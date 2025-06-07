@@ -19,7 +19,7 @@
 using namespace std;
 
 // Game constants
-constexpr int ROW = 20, COL = 10;
+constexpr int ROW = 15, COL = 10;
 constexpr int MAX_SQUARE = ROW * COL;
 
 // Pre-computed constants for better performance
@@ -52,6 +52,7 @@ const string GREY         = "\033[38;2;170;170;170m";
 const string BLUE         = "\033[38;2;0;170;255m";
 const string BLUE_SHADOW  = "\033[38;2;50;100;150m";
 const string DARK_GREY    = "\033[38;2;80;80;80m";
+const string CORAL        = "\033[38;2;244;100;103m"; 
 const string CLEAR_SCREEN = "\033[2J\033[H";
 const string HIDE_CURSOR  = "\033[?25l";
 const string SHOW_CURSOR  = "\033[?25h";
@@ -85,7 +86,9 @@ struct Point {
 using Tetromino = vector<Point>;
 
 // Tetromino definitions with proper shapes [Noting down all offsets from a point]
-const array<Tetromino, 9> TETROMINOS = {{
+const array<Tetromino, 10> TETROMINOS = {{
+    {{0,0}, {0,1}},                         // - - Mini- I
+    {{0,0}},                                // . - Dot
     {{0,0}, {0,1}, {1,0}, {1,1}},           // O - Square
     {{-1,0}, {0,0}, {1,0}, {2,0}},          // I - Line
     {{-1,0}, {-1,1}, {0,0}, {1,0}},         // L - L-piece
@@ -93,8 +96,7 @@ const array<Tetromino, 9> TETROMINOS = {{
     {{-1,1}, {0,1}, {0,0}, {1,0}},          // S - S-piece
     {{-1,0}, {0,0}, {0,1}, {1,1}},          // Z - Z-piece
     {{-1,0}, {0,0}, {1,0}, {0,1}},          // T - T-piece
-    {{0,0}},                                // . - Dot
-    {{0,0}, {0,1}},                         // - - 2 Length I
+    {{0,0}, {1,1}},                         // / - slash
 }};
 
 // Current piece state
@@ -102,8 +104,9 @@ struct BlockPiece {
     Tetromino shape;
     Point position;
     int rotation = 0;
+    int type = 0; // Store the tetromino type index
     
-    BlockPiece(const Tetromino& t, Point pos) : shape(t), position(pos) {}
+    BlockPiece(const Tetromino& t, Point pos, int piece_type) : shape(t), position(pos), type(piece_type) {}
     
     // Get current rotated shape
     Tetromino get_rotated_shape() const {
@@ -140,7 +143,6 @@ Point create_spawn_point() {
 inline bool is_valid_position(int col, int row) noexcept {
     return col >= 0 && col < COL && row >= 0 && row < ROW;
 }
-
 
 // Add a block to the image at the given position
 inline void mark_point_on_img(Point pt, bitset<MAX_SQUARE>& image) noexcept {
@@ -232,14 +234,51 @@ bitset<MAX_SQUARE> block_shadow(const bitset<MAX_SQUARE>& screen, BlockPiece pie
     return create_image(shadow_piece);
 }
 
+// Display the next piece preview
+void display_next_piece(const BlockPiece& next_piece, string *output_buffer) {
+    *output_buffer += ("Next Piece:" + RESET + "\n");
+    
+    // Create a small preview of the next piece
+    auto shape = next_piece.shape;
+    
+    // Find bounds of the piece
+    int min_col = 0, max_col = 0;
+    for (const auto& pt : shape) {
+        min_col = min(min_col, pt.col);
+        max_col = max(max_col, pt.col);
+    }
+    
+    // Always display a consistent 4x4 preview grid
+    const int preview_size = 4;
+    for (int row = preview_size - 1; row >= 0; row--) {
+        *output_buffer += (GREY + " ." + RESET);
+        for (int col = min_col; col <= min_col + preview_size - 1; col++) {
+            bool found = false;
+            for (const auto& pt : shape) {
+                if (pt.col == col && pt.row == row) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                *output_buffer += (CORAL + "[]" + RESET);
+            } else {
+                *output_buffer += (GREY + " ." + RESET);
+            }
+        }
+        *output_buffer += "\n";
+    }
+    *output_buffer += "\n";
+}
+
 // Display the game board
 void display_board(
         const bitset<MAX_SQUARE>& screen, const bitset<MAX_SQUARE>& image, 
-        const BlockPiece& piece, unsigned score, unsigned speed, bool display_shadow = true
+        const BlockPiece& piece, const BlockPiece& next_piece, unsigned score, unsigned speed, bool display_shadow = true
     ) {
     static string output_buffer;
     output_buffer.clear();
-    output_buffer.reserve(3072); // Pre-allocate buffer
+    output_buffer.reserve(3072);
     
     output_buffer += MOVE_HOME;
 
@@ -249,17 +288,26 @@ void display_board(
     }
 
     const bool larger_mode = (COL >= 10);
-
+    
     // Score and controls
-    output_buffer += "Score: " + to_string(score) + "  |  Speed: " + to_string(speed) + " |  Space=Rotate ESC=Quit\n";
+    output_buffer += "Score: " + to_string(score) + "  |  Speed: " + to_string(speed) + " |  Space=Rotate ESC=Quit\n\n";
+
+    cout << output_buffer;
+    output_buffer.clear();
+
+    // Display next piece
+    display_next_piece(next_piece, &output_buffer);
+    
+    cout << output_buffer;
+    output_buffer.clear();
 
     // Header row
-    output_buffer += "     ";
+    output_buffer += "    |";
     for (int i = 0; i < COL; i++) {
         output_buffer += (i < 9 ? " " : "") + to_string(i + 1);
         if (larger_mode) output_buffer += " ";
     }
-    output_buffer += '\n';
+    output_buffer += "|\n";
 
     // Pre-compute block strings
     const string grey_block = BOLD + GREY + "[" + (larger_mode ? " " : "") + "]" + RESET;
@@ -288,11 +336,11 @@ void display_board(
     }
     
     // Bottom border
-    output_buffer += "    -";
+    output_buffer += "    +";
     for (int i = 0; i < COL * (larger_mode ? 3 : 2); i++) {
         output_buffer += "-";
     }
-    output_buffer += "-\n";
+    output_buffer += "+\n";
     
     cout << output_buffer << flush;
 }
@@ -424,6 +472,18 @@ void handle_kb_event(bitset<MAX_SQUARE>& screen, BlockPiece& piece, bitset<MAX_S
         }
     } else {
         switch (key) {
+            case 's':  // Down arrow
+                block_drop(screen, piece, image);
+                break;
+            case 'a':  // Left arrow
+                block_move_horizontal(screen, piece, image, -1);
+                break;
+            case 'd':  // Right arrow
+                block_move_horizontal(screen, piece, image, 1);
+                break;
+            case 'w':  // Up arrow (alternative rotate)
+                block_rotate(screen, piece, image);
+                break;
             case 27:  // ESC
                 running = false;
                 break;
@@ -438,10 +498,10 @@ void handle_kb_event(bitset<MAX_SQUARE>& screen, BlockPiece& piece, bitset<MAX_S
     }
 }
 
-// Functrion to spawn new random piece
+// Function to spawn new random piece
 BlockPiece spawn_new_piece() {
     int piece_type = random_number(0, TETROMINOS.size());
-    return BlockPiece(TETROMINOS[piece_type], create_spawn_point());
+    return BlockPiece(TETROMINOS[piece_type], create_spawn_point(), piece_type);
 }
 
 // Main game loop
@@ -457,6 +517,7 @@ void game_loop() {
     hide_cursor();
     
     BlockPiece current_piece = spawn_new_piece();
+    BlockPiece next_piece = spawn_new_piece(); // Generate the next piece
     image = create_image(current_piece);
     
     auto last_fall = chrono::steady_clock::now();
@@ -481,8 +542,9 @@ void game_loop() {
                 check_for_score(screen, score);
                 level = score / 250 + 1;
                 
-                // Spawn new piece
-                current_piece = spawn_new_piece();
+                // Move next piece to current and generate new next piece
+                current_piece = next_piece;
+                next_piece = spawn_new_piece();
                 image = create_image(current_piece);
                 
                 // Check game over
@@ -495,7 +557,7 @@ void game_loop() {
         }
         
         // Render
-        display_board(screen, image, current_piece, score, level);
+        display_board(screen, image, current_piece, next_piece, score, level);
         
         // Maintain ~60 FPS
         const auto frame_end = chrono::high_resolution_clock::now();
@@ -518,6 +580,15 @@ void game_loop() {
 }
 
 int main() {
+    // Some Setting Checks
+    if (COL < 5){
+        cerr << "Error: Screen width must be at least 5 characters.\n";
+        return 1;
+    } else if (ROW < 3) {
+        cerr << "Error: Screen height must be at least 5 characters.\n";
+        return 1;
+    }
+
     enable_ansi_support();
     game_loop();
     return 0;
